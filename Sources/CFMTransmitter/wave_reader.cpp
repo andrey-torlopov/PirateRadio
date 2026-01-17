@@ -1,3 +1,4 @@
+#ifdef __linux__
 /*
     FM Transmitter - use Raspberry Pi as FM transmitter
 
@@ -30,8 +31,6 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-#ifdef __linux__
 
 #include "wave_reader.hpp"
 #include <stdexcept>
@@ -231,5 +230,6 @@ std::vector<uint8_t> WaveReader::ReadData(unsigned bytesToRead, bool headerBytes
     }
 
     return data;
+}
 
 #endif // __linux__

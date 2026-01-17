@@ -1,3 +1,4 @@
+#ifdef __linux__
 /*
 Copyright (c) 2012, Broadcom Europe Ltd.
 All rights reserved.
@@ -24,8 +25,6 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-#ifdef __linux__
 
 #include <stdio.h>
 #include <string.h>
@@ -96,9 +95,9 @@ static int mbox_property(int file_desc, void *buf)
    }
 
 #ifdef DEBUG
-   unsigned *p = static_cast<unsigned*>(buf); int i; unsigned size = *(unsigned *)buf;
+   unsigned *p = buf; int i; unsigned size = *(unsigned *)buf;
    for (i=0; i<size/4; i++)
-      printf("%04x: 0x%08x\n", (unsigned)(i*sizeof *p), p[i]);
+      printf("%04x: 0x%08x\n", i*sizeof *p, p[i]);
 #endif
    return ret_val;
 }

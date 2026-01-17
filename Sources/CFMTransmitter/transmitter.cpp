@@ -1,3 +1,4 @@
+#ifdef __linux__
 /*
     FM Transmitter - use Raspberry Pi as FM transmitter
 
@@ -30,8 +31,6 @@
     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
     WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-#ifdef __linux__
 
 #include "transmitter.hpp"
 #include "mailbox.hpp"
@@ -598,5 +597,6 @@ void Transmitter::CpuTxThread(unsigned sampleRate, unsigned clockDivisor, unsign
         lock.unlock();
         cv.notify_all();
     }
+}
 
 #endif // __linux__
