@@ -39,7 +39,8 @@ public final class Playlist {
         return tracks[currentIndex]
     }
 
-    private var directoryMonitor: DispatchSourceFileSystemObject?
+    private var monitoringThread: Thread?
+    private var isMonitoring = false
     private let queue = DispatchQueue(label: "com.pirateradio.playlist")
 
     public init(directory: URL) {
@@ -123,34 +124,27 @@ public final class Playlist {
         }
     }
 
-    /// Начать мониторинг папки на изменения
+    /// Начать мониторинг папки на изменения (polling-based, кроссплатформенный)
     public func startMonitoring() {
         stopMonitoring()
+        isMonitoring = true
 
-        let fd = open(directory.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-
-        directoryMonitor = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd,
-            eventMask: [.write, .delete, .rename],
-            queue: queue
-        )
-
-        directoryMonitor?.setEventHandler { [weak self] in
-            try? self?.scan()
+        // Простой polling каждые 5 секунд — работает на всех платформах
+        monitoringThread = Thread { [weak self] in
+            while let self = self, self.isMonitoring {
+                Thread.sleep(forTimeInterval: 5.0)
+                if self.isMonitoring {
+                    try? self.scan()
+                }
+            }
         }
-
-        directoryMonitor?.setCancelHandler {
-            close(fd)
-        }
-
-        directoryMonitor?.resume()
+        monitoringThread?.start()
     }
 
     /// Остановить мониторинг
     public func stopMonitoring() {
-        directoryMonitor?.cancel()
-        directoryMonitor = nil
+        isMonitoring = false
+        monitoringThread = nil
     }
 }
 
