@@ -231,6 +231,5 @@ std::vector<uint8_t> WaveReader::ReadData(unsigned bytesToRead, bool headerBytes
     }
 
     return data;
-}
--e 
+
 #endif // __linux__

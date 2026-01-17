@@ -263,5 +263,5 @@ int mbox_open() {
 void mbox_close(int file_desc) {
   close(file_desc);
 }
--e 
+
 #endif // __linux__

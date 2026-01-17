@@ -598,6 +598,5 @@ void Transmitter::CpuTxThread(unsigned sampleRate, unsigned clockDivisor, unsign
         lock.unlock();
         cv.notify_all();
     }
-}
--e 
+
 #endif // __linux__
