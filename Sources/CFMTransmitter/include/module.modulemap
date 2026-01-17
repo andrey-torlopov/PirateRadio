@@ -1,0 +1,4 @@
+module CFMTransmitter {
+    header "CFMTransmitter.h"
+    export *
+}
