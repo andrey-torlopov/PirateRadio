@@ -40,6 +40,21 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <climits>
+#include <cerrno>
+
+namespace {
+
+bool ChunkIdEquals(const uint8_t id[4], const char *expected)
+{
+    return std::memcmp(id, expected, 4) == 0;
+}
+
+void CopyChunkId(uint8_t destination[4], const uint8_t source[4])
+{
+    std::memcpy(destination, source, 4);
+}
+
+}
 
 Sample::Sample(uint8_t *data, unsigned channels, unsigned bitsPerChannel)
     : value(0.f)
@@ -81,30 +96,77 @@ WaveReader::WaveReader(const std::string &filename, bool &enable, std::mutex &mt
     }
 
     try {
-        ReadData(sizeof(WaveHeader::chunkID) + sizeof(WaveHeader::chunkSize) + sizeof(WaveHeader::format), true, enable, mtx);
-        if ((std::string(reinterpret_cast<char *>(header.chunkID), 4) != std::string("RIFF")) || (std::string(reinterpret_cast<char *>(header.format), 4) != std::string("WAVE"))) {
+        std::memset(&header, 0, sizeof(header));
+
+        std::vector<uint8_t> riffHeader = ReadRawData(
+            sizeof(WaveHeader::chunkID) + sizeof(WaveHeader::chunkSize) + sizeof(WaveHeader::format),
+            true,
+            enable,
+            mtx
+        );
+        std::memcpy(header.chunkID, riffHeader.data(), sizeof(WaveHeader::chunkID));
+        std::memcpy(&header.chunkSize, riffHeader.data() + sizeof(WaveHeader::chunkID), sizeof(WaveHeader::chunkSize));
+        std::memcpy(header.format, riffHeader.data() + sizeof(WaveHeader::chunkID) + sizeof(WaveHeader::chunkSize), sizeof(WaveHeader::format));
+        if (!ChunkIdEquals(header.chunkID, "RIFF") || !ChunkIdEquals(header.format, "WAVE")) {
             throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", WAVE file expected"));
         }
 
-        ReadData(sizeof(WaveHeader::subchunk1ID) + sizeof(WaveHeader::subchunk1Size), true, enable, mtx);
         unsigned subchunk1MinSize = sizeof(WaveHeader::audioFormat) + sizeof(WaveHeader::channels) +
             sizeof(WaveHeader::sampleRate) + sizeof(WaveHeader::byteRate) + sizeof(WaveHeader::blockAlign) +
             sizeof(WaveHeader::bitsPerSample);
-        if ((std::string(reinterpret_cast<char *>(header.subchunk1ID), 4) != std::string("fmt ")) || (header.subchunk1Size < subchunk1MinSize)) {
-            throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
-        }
+        bool formatChunkFound = false;
+        bool dataChunkFound = false;
 
-        ReadData(header.subchunk1Size, true, enable, mtx);
-        if ((header.audioFormat != WAVE_FORMAT_PCM) ||
-            (header.byteRate != (header.bitsPerSample >> 3) * header.channels * header.sampleRate) ||
-            (header.blockAlign != (header.bitsPerSample >> 3) * header.channels) ||
-            (((header.bitsPerSample >> 3) != 1) && ((header.bitsPerSample >> 3) != 2))) {
-            throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", unsupported WAVE format"));
-        }
+        while (!dataChunkFound) {
+            std::vector<uint8_t> chunkHeader = ReadRawData(
+                sizeof(WaveHeader::subchunk1ID) + sizeof(WaveHeader::subchunk1Size),
+                true,
+                enable,
+                mtx
+            );
 
-        ReadData(sizeof(WaveHeader::subchunk2ID) + sizeof(WaveHeader::subchunk2Size), true, enable, mtx);
-        if (std::string(reinterpret_cast<char *>(header.subchunk2ID), 4) != std::string("data")) {
-            throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
+            uint8_t chunkID[4];
+            uint32_t chunkSize;
+            std::memcpy(chunkID, chunkHeader.data(), sizeof(chunkID));
+            std::memcpy(&chunkSize, chunkHeader.data() + sizeof(chunkID), sizeof(chunkSize));
+
+            if (ChunkIdEquals(chunkID, "fmt ")) {
+                if (chunkSize < subchunk1MinSize) {
+                    throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
+                }
+
+                std::vector<uint8_t> formatData = ReadRawData(chunkSize, true, enable, mtx);
+                CopyChunkId(header.subchunk1ID, chunkID);
+                header.subchunk1Size = chunkSize;
+                std::memcpy(&header.audioFormat, formatData.data(), sizeof(header.audioFormat));
+                std::memcpy(&header.channels, formatData.data() + 2, sizeof(header.channels));
+                std::memcpy(&header.sampleRate, formatData.data() + 4, sizeof(header.sampleRate));
+                std::memcpy(&header.byteRate, formatData.data() + 8, sizeof(header.byteRate));
+                std::memcpy(&header.blockAlign, formatData.data() + 12, sizeof(header.blockAlign));
+                std::memcpy(&header.bitsPerSample, formatData.data() + 14, sizeof(header.bitsPerSample));
+
+                if ((header.audioFormat != WAVE_FORMAT_PCM) ||
+                    (header.byteRate != (header.bitsPerSample >> 3) * header.channels * header.sampleRate) ||
+                    (header.blockAlign != (header.bitsPerSample >> 3) * header.channels) ||
+                    (((header.bitsPerSample >> 3) != 1) && ((header.bitsPerSample >> 3) != 2))) {
+                    throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", unsupported WAVE format"));
+                }
+
+                if (chunkSize % 2) {
+                    SkipData(1, enable, mtx);
+                }
+                formatChunkFound = true;
+            } else if (ChunkIdEquals(chunkID, "data")) {
+                if (!formatChunkFound) {
+                    throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
+                }
+
+                CopyChunkId(header.subchunk2ID, chunkID);
+                header.subchunk2Size = chunkSize;
+                dataChunkFound = true;
+            } else {
+                SkipData(chunkSize + (chunkSize % 2), enable, mtx);
+            }
         }
     } catch (...) {
         if (fileDescriptor != STDIN_FILENO) {
@@ -114,7 +176,8 @@ WaveReader::WaveReader(const std::string &filename, bool &enable, std::mutex &mt
     }
 
     if (fileDescriptor != STDIN_FILENO) {
-        dataOffset = lseek(fileDescriptor, 0, SEEK_CUR);
+        off_t offset = lseek(fileDescriptor, 0, SEEK_CUR);
+        dataOffset = (offset == -1) ? 0 : static_cast<unsigned>(offset);
     }
 }
 
@@ -167,7 +230,7 @@ bool WaveReader::SetSampleOffset(unsigned offset) {
     return true;
 }
 
-std::vector<uint8_t> WaveReader::ReadData(unsigned bytesToRead, bool headerBytes, bool &enable, std::mutex &mtx)
+std::vector<uint8_t> WaveReader::ReadRawData(unsigned bytesToRead, bool requireFull, bool &enable, std::mutex &mtx)
 {
     unsigned bytesRead = 0;
     std::vector<uint8_t> data;
@@ -183,53 +246,66 @@ std::vector<uint8_t> WaveReader::ReadData(unsigned bytesToRead, bool headerBytes
                 break;
             }
         }
-        int bytes = read(fileDescriptor, &data[bytesRead], bytesToRead - bytesRead);
-        if (((bytes == -1) && ((fileDescriptor != STDIN_FILENO) || (errno != EAGAIN))) ||
-            ((static_cast<unsigned>(bytes) < bytesToRead) && headerBytes && (fileDescriptor != STDIN_FILENO))) {
+        ssize_t bytes = read(fileDescriptor, &data[bytesRead], bytesToRead - bytesRead);
+        if (bytes == -1 && errno == EINTR) {
+            continue;
+        }
+        if ((bytes == -1) && ((fileDescriptor != STDIN_FILENO) || (errno != EAGAIN))) {
             throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
+        }
+        if (bytes == 0) {
+            break;
         }
         if (bytes > 0) {
             bytesRead += bytes;
         }
-        if (bytesRead < bytesToRead) {
-            if (fileDescriptor != STDIN_FILENO) {
-                data.resize(bytesRead);
-                break;
-            } else {
-                FD_ZERO(&fds);
-                FD_SET(STDIN_FILENO, &fds);
-                select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &timeout);
-                if (FD_ISSET(STDIN_FILENO, &fds)) {
-                    FD_CLR(STDIN_FILENO, &fds);
-                }
+        if (bytesRead < bytesToRead && fileDescriptor == STDIN_FILENO) {
+            FD_ZERO(&fds);
+            FD_SET(STDIN_FILENO, &fds);
+            select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &timeout);
+            if (FD_ISSET(STDIN_FILENO, &fds)) {
+                FD_CLR(STDIN_FILENO, &fds);
             }
-        }
-        if (bytes == 0) {
-            data.resize(bytesRead);
-            break;
         }
     }
 
-    if (headerBytes) {
+    data.resize(bytesRead);
+    if (requireFull && bytesRead < bytesToRead) {
         {
             std::lock_guard<std::mutex> lock(mtx);
             if (!enable) {
                 throw std::runtime_error("Cannot obtain header, program interrupted");
             }
         }
-        std::memcpy(&(reinterpret_cast<uint8_t *>(&header))[headerOffset], data.data(), bytesRead);
-        headerOffset += bytesRead;
-    } else {
-        {
-            std::lock_guard<std::mutex> lock(mtx);
-            if (!enable) {
-                data.resize(bytesRead);
-            }
-        }
-        currentDataOffset += bytesRead;
+        throw std::runtime_error(std::string("Error while opening ") + GetFilename() + std::string(", data corrupted"));
     }
 
     return data;
+}
+
+std::vector<uint8_t> WaveReader::ReadData(unsigned bytesToRead, bool headerBytes, bool &enable, std::mutex &mtx)
+{
+    std::vector<uint8_t> data = ReadRawData(bytesToRead, headerBytes, enable, mtx);
+
+    if (headerBytes) {
+        std::memcpy(&(reinterpret_cast<uint8_t *>(&header))[headerOffset], data.data(), data.size());
+        headerOffset += data.size();
+    } else {
+        currentDataOffset += data.size();
+    }
+
+    return data;
+}
+
+void WaveReader::SkipData(unsigned bytesToSkip, bool &enable, std::mutex &mtx)
+{
+    const unsigned bufferSize = 4096;
+    unsigned bytesLeft = bytesToSkip;
+    while (bytesLeft > 0) {
+        unsigned bytesToRead = bytesLeft > bufferSize ? bufferSize : bytesLeft;
+        ReadRawData(bytesToRead, true, enable, mtx);
+        bytesLeft -= bytesToRead;
+    }
 }
 
 #endif // __linux__

@@ -79,7 +79,9 @@ class WaveReader
         std::vector<Sample> GetSamples(unsigned quantity, bool &enable, std::mutex &mtx);
         bool SetSampleOffset(unsigned offset);
     private:
+        std::vector<uint8_t> ReadRawData(unsigned bytesToRead, bool requireFull, bool &enable, std::mutex &mtx);
         std::vector<uint8_t> ReadData(unsigned bytesToRead, bool headerBytes, bool &enable, std::mutex &mtx);
+        void SkipData(unsigned bytesToSkip, bool &enable, std::mutex &mtx);
 
         std::string filename;
         WaveHeader header;

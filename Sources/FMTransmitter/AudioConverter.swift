@@ -28,7 +28,12 @@ public struct AudioConverter {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ffmpeg")
         process.arguments = [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
             "-i", inputPath,
+            "-map_metadata", "-1",
+            "-bitexact",
             "-f", "wav",
             "-acodec", "pcm_s16le",
             "-ar", "\(sampleRate)",
@@ -55,9 +60,14 @@ public struct AudioConverter {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ffmpeg")
         process.arguments = [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
             "-f", "concat",
             "-safe", "0",
             "-i", listFile.path,
+            "-map_metadata", "-1",
+            "-bitexact",
             "-f", "wav",
             "-acodec", "pcm_s16le",
             "-ar", "\(sampleRate)",

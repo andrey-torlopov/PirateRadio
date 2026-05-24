@@ -76,10 +76,7 @@ public final class RadioStation {
         playlist.stopMonitoring()
         isBroadcasting = false
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.delegate?.radioStationDidStop(self)
-        }
+        delegate?.radioStationDidStop(self)
     }
 
     /// Следующий трек
@@ -190,24 +187,15 @@ public final class RadioStation {
     }
 
     private func notifyStarted(_ track: String) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.delegate?.radioStation(self, didStartPlaying: track)
-        }
+        delegate?.radioStation(self, didStartPlaying: track)
     }
 
     private func notifyFinished(_ track: String) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.delegate?.radioStation(self, didFinishPlaying: track)
-        }
+        delegate?.radioStation(self, didFinishPlaying: track)
     }
 
     private func notifyError(_ error: Error) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.delegate?.radioStation(self, didEncounterError: error)
-        }
+        delegate?.radioStation(self, didEncounterError: error)
     }
 }
 
