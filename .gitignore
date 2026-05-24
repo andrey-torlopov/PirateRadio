@@ -85,3 +85,9 @@ LoggerConfig.json
 *.xcuserstate
 .claude
 .idea
+_ai/*
+Artifacts/*
+AGENTS.md
+CLAUDE.md
+COMMON.md
+GEMINI.md
