@@ -1,0 +1,35 @@
+# Build artifacts and caches
+build/
+
+# IDE configuration
+.idea/
+.cursor/
+
+# CI/CD (not relevant for QA work)
+.github/
+.git/
+.gitlab/
+
+.DS_Store
+
+# SPM
+
+.build
+.swiftpm
+
+# Fastlane
+
+/**/fastlane/*
+!/**/fastlane/*file*
+!/**/fastlane/.env*
+
+# Tuist
+
+/**/Derived/
+/**/*.xcodeproj/
+/**/*.xcworkspace/
+
+# Custom
+
+.ignore
+.gitignore

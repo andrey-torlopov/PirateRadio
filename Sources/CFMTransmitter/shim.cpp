@@ -91,6 +91,9 @@ FMTransmitterError fm_transmitter_start_file(
     if (handle->running) {
         return FM_ERROR_ALREADY_RUNNING;
     }
+    if (handle->workerThread.joinable()) {
+        handle->workerThread.join();
+    }
     
     {
         std::lock_guard<std::mutex> lock(handle->mtx);
@@ -131,6 +134,9 @@ FMTransmitterError fm_transmitter_start_stdin(
     
     if (handle->running) {
         return FM_ERROR_ALREADY_RUNNING;
+    }
+    if (handle->workerThread.joinable()) {
+        handle->workerThread.join();
     }
     
     {

@@ -1,4 +1,9 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
 
 /// Делегат радиостанции
 public protocol RadioStationDelegate: AnyObject {
@@ -27,7 +32,9 @@ public final class RadioStation {
 
     private var config: FMTransmitterConfiguration
     private var currentProcess: Process?
-    private var fmProcess: Process?
+    private var currentTransmitter: FMTransmitter?
+    private var currentPipeWriter: FileHandle?
+    private var currentPipePath: String?
     private let queue = DispatchQueue(label: "com.pirateradio.station")
     private var shouldStop = false
 
@@ -60,7 +67,12 @@ public final class RadioStation {
     public func stop() {
         shouldStop = true
         currentProcess?.terminate()
-        fmProcess?.terminate()
+        currentPipeWriter?.closeFile()
+        currentPipeWriter = nil
+        currentTransmitter?.stop()
+        if let currentPipePath {
+            try? FileManager.default.removeItem(atPath: currentPipePath)
+        }
         playlist.stopMonitoring()
         isBroadcasting = false
 
@@ -73,12 +85,18 @@ public final class RadioStation {
     /// Следующий трек
     public func nextTrack() {
         currentProcess?.terminate()
+        currentPipeWriter?.closeFile()
+        currentPipeWriter = nil
+        currentTransmitter?.stop()
         _ = playlist.nextTrack()
     }
 
     /// Предыдущий трек
     public func previousTrack() {
         currentProcess?.terminate()
+        currentPipeWriter?.closeFile()
+        currentPipeWriter = nil
+        currentTransmitter?.stop()
         _ = playlist.previousTrack()
     }
 
@@ -118,40 +136,56 @@ public final class RadioStation {
     }
 
     private func playTrack(_ path: String) throws {
-        // Создаём пайп: ffmpeg -> fm_transmitter
-        let ffmpeg = AudioConverter.createConversionProcess(inputPath: path)
-        let pipe = Pipe()
-        ffmpeg.standardOutput = pipe
+        let fifoURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pirate-radio-\(UUID().uuidString).wav")
+        let fifoPath = fifoURL.path
 
-        // fm_transmitter читает из stdin
-        let fmTransmitter = Process()
-        fmTransmitter.executableURL = URL(fileURLWithPath: "/usr/local/bin/fm_transmitter")
-        fmTransmitter.arguments = [
-            "-f", String(format: "%.1f", frequency),
-            "-"
-        ]
-        fmTransmitter.standardInput = pipe
-        fmTransmitter.standardOutput = FileHandle.nullDevice
-        fmTransmitter.standardError = FileHandle.nullDevice
+        guard mkfifo(fifoPath, S_IRUSR | S_IWUSR) == 0 else {
+            throw RadioStationError.audioPipeFailed(String(cString: strerror(errno)))
+        }
+
+        currentPipePath = fifoPath
+        defer {
+            currentProcess = nil
+            currentPipeWriter?.closeFile()
+            currentPipeWriter = nil
+            currentTransmitter?.stop()
+            currentTransmitter = nil
+            try? FileManager.default.removeItem(atPath: fifoPath)
+            currentPipePath = nil
+        }
+
+        let transmitter = try FMTransmitter()
+        currentTransmitter = transmitter
+        try transmitter.transmit(file: fifoPath, config: config)
+
+        guard let pipeWriter = FileHandle(forWritingAtPath: fifoPath) else {
+            throw RadioStationError.audioPipeFailed("Не удалось открыть FIFO для записи: \(fifoPath)")
+        }
+        currentPipeWriter = pipeWriter
+
+        let ffmpeg = AudioConverter.createConversionProcess(inputPath: path)
+        ffmpeg.standardOutput = pipeWriter
 
         currentProcess = ffmpeg
-        fmProcess = fmTransmitter
 
         try ffmpeg.run()
-        try fmTransmitter.run()
-
-        // Ждём завершения ffmpeg (он закончит когда файл прочитан)
         ffmpeg.waitUntilExit()
+        if currentPipeWriter === pipeWriter {
+            pipeWriter.closeFile()
+            currentPipeWriter = nil
+        }
 
-        // Даём fm_transmitter время допроиграть буфер
-        Thread.sleep(forTimeInterval: 0.5)
-        fmTransmitter.terminate()
-
-        currentProcess = nil
-        fmProcess = nil
+        while transmitter.isRunning && !shouldStop {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
 
         if ffmpeg.terminationStatus != 0 && !shouldStop {
             throw RadioStationError.conversionFailed(path)
+        }
+
+        if let lastError = transmitter.lastError, !shouldStop {
+            throw RadioStationError.transmissionFailed(lastError)
         }
     }
 
@@ -180,14 +214,17 @@ public final class RadioStation {
 /// Ошибки радиостанции
 public enum RadioStationError: Error, LocalizedError {
     case conversionFailed(String)
-    case transmitterNotFound
+    case transmissionFailed(String)
+    case audioPipeFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .conversionFailed(let path):
             return "Не удалось конвертировать файл: \(path)"
-        case .transmitterNotFound:
-            return "fm_transmitter не найден. Установите его в /usr/local/bin/"
+        case .transmissionFailed(let reason):
+            return "Ошибка FM-передатчика: \(reason)"
+        case .audioPipeFailed(let reason):
+            return "Не удалось создать аудио-пайп: \(reason)"
         }
     }
 }

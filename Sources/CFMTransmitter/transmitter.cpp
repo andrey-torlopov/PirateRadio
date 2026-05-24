@@ -34,13 +34,18 @@
 
 #include "transmitter.hpp"
 #include "mailbox.hpp"
-#include <bcm_host.h>
 #include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <cmath>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
+#include <cstdint>
 
 #define PERIPHERALS_PHYS_BASE 0x7e000000
 #define BCM2835_PERI_VIRT_BASE 0x20000000
@@ -100,6 +105,103 @@
 
 #define BUFFER_TIME 1000000
 #define PAGE_SIZE 4096
+
+namespace {
+
+uint32_t ReadBigEndianCell(const std::vector<unsigned char> &data, std::size_t cellIndex) {
+    std::size_t offset = cellIndex * sizeof(uint32_t);
+    if (offset + sizeof(uint32_t) > data.size()) {
+        throw std::runtime_error("Device tree cell offset is out of range");
+    }
+    return (static_cast<uint32_t>(data[offset]) << 24) |
+           (static_cast<uint32_t>(data[offset + 1]) << 16) |
+           (static_cast<uint32_t>(data[offset + 2]) << 8) |
+           static_cast<uint32_t>(data[offset + 3]);
+}
+
+std::vector<unsigned char> ReadDeviceTreeBytes(const char *path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return {};
+    }
+    return std::vector<unsigned char>(
+        std::istreambuf_iterator<char>(file),
+        std::istreambuf_iterator<char>()
+    );
+}
+
+uint32_t ReadDeviceTreeCell(const char *path, uint32_t fallback) {
+    std::vector<unsigned char> data = ReadDeviceTreeBytes(path);
+    if (data.size() < sizeof(uint32_t)) {
+        return fallback;
+    }
+    return ReadBigEndianCell(data, 0);
+}
+
+uint64_t ReadBigEndianCells(const std::vector<uint32_t> &cells, std::size_t offset, uint32_t count) {
+    if (count == 0 || count > 2 || offset + count > cells.size()) {
+        throw std::runtime_error("Unsupported device tree address cell layout");
+    }
+
+    uint64_t value = 0;
+    for (uint32_t index = 0; index < count; index++) {
+        value = (value << 32) | cells[offset + index];
+    }
+    return value;
+}
+
+struct PeripheralInfo {
+    uintptr_t baseAddress;
+    unsigned size;
+};
+
+PeripheralInfo DetectPeripheralInfo() {
+    std::vector<unsigned char> data = ReadDeviceTreeBytes("/proc/device-tree/soc/ranges");
+    if (data.size() >= 3 * sizeof(uint32_t)) {
+        std::vector<uint32_t> cells;
+        cells.reserve(data.size() / sizeof(uint32_t));
+        for (std::size_t index = 0; index + sizeof(uint32_t) <= data.size(); index += sizeof(uint32_t)) {
+            cells.push_back(ReadBigEndianCell(data, index / sizeof(uint32_t)));
+        }
+
+        uint32_t childAddressCells = ReadDeviceTreeCell("/proc/device-tree/soc/#address-cells", 1);
+        uint32_t parentAddressCells = ReadDeviceTreeCell("/proc/device-tree/#address-cells", sizeof(uintptr_t) > 4 ? 2 : 1);
+        uint32_t sizeCells = ReadDeviceTreeCell("/proc/device-tree/soc/#size-cells", 1);
+        std::size_t tupleCells = childAddressCells + parentAddressCells + sizeCells;
+
+        if (tupleCells > 0 && cells.size() >= tupleCells) {
+            uint64_t base = ReadBigEndianCells(cells, childAddressCells, parentAddressCells);
+            uint64_t size = ReadBigEndianCells(cells, childAddressCells + parentAddressCells, sizeCells);
+            if (base != 0 && size != 0) {
+                return {static_cast<uintptr_t>(base), static_cast<unsigned>(size)};
+            }
+        }
+
+        if (cells.size() >= 4 && cells[1] == 0 && cells[2] != 0 && cells[3] != 0) {
+            return {static_cast<uintptr_t>(cells[2]), cells[3]};
+        }
+        if (cells.size() >= 3 && cells[1] != 0 && cells[2] != 0) {
+            return {static_cast<uintptr_t>(cells[1]), cells[2]};
+        }
+    }
+
+    std::vector<unsigned char> modelBytes = ReadDeviceTreeBytes("/proc/device-tree/model");
+    std::string model(modelBytes.begin(), modelBytes.end());
+    if (model.find("Raspberry Pi 4") != std::string::npos ||
+        model.find("Compute Module 4") != std::string::npos ||
+        model.find("Raspberry Pi 400") != std::string::npos) {
+        return {BCM2711_PERI_VIRT_BASE, 0x01000000};
+    }
+    if (model.find("Raspberry Pi 2") != std::string::npos ||
+        model.find("Raspberry Pi 3") != std::string::npos ||
+        model.find("Compute Module 3") != std::string::npos) {
+        return {0x3f000000, 0x01000000};
+    }
+
+    return {BCM2835_PERI_VIRT_BASE, 0x01000000};
+}
+
+} // namespace
 
 struct ClockRegisters {
     uint32_t ctl;
@@ -161,8 +263,12 @@ class Peripherals
         uintptr_t GetVirtualAddress(uintptr_t offset) const {
             return reinterpret_cast<uintptr_t>(peripherals) + offset;
         }
+        static const PeripheralInfo &GetPeripheralInfo() {
+            static const PeripheralInfo info = DetectPeripheralInfo();
+            return info;
+        }
         static uintptr_t GetVirtualBaseAddress() {
-            return (bcm_host_get_peripheral_size() == BCM2711_PERI_VIRT_BASE) ? BCM2711_PERI_VIRT_BASE : bcm_host_get_peripheral_address();
+            return GetPeripheralInfo().baseAddress;
         }
         static float GetClockFrequency() {
             return (Peripherals::GetVirtualBaseAddress() == BCM2711_PERI_VIRT_BASE) ? BCM2711_PLLD_FREQ : BCM2835_PLLD_FREQ;
@@ -181,11 +287,7 @@ class Peripherals
             }
         }
         unsigned GetSize() {
-            unsigned size = bcm_host_get_peripheral_size();
-            if (size == BCM2711_PERI_VIRT_BASE) {
-                size = 0x01000000;
-            }
-            return size;
+            return Peripherals::GetPeripheralInfo().size;
         }
 
         void *peripherals;

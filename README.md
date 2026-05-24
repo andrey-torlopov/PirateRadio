@@ -2,45 +2,96 @@
 
 FM-радиостанция на Raspberry Pi. Транслирует музыку из папки на выбранной FM-частоте.
 
+> Важно: проект работает с низкоуровневыми регистрами Raspberry Pi через `/dev/mem` и `/dev/vcio`.
+> Запускайте только на своём оборудовании, на минимальной мощности и с учётом местного законодательства.
+
 ## Требования
 
 ### Hardware
-- Raspberry Pi (любая модель с GPIO)
+- Raspberry Pi с GPIO и Raspberry Pi OS 64-bit.
+- Целевые модели: Raspberry Pi Zero 2 W, 3, 4, 400, Compute Module 3/4.
+- Raspberry Pi 5 пока не считается поддержанной платформой: у неё другая SoC-платформа, работу FM-части нужно отдельно проверять.
 - Провод 20-40 см к GPIO 4 (pin 7) в качестве антенны
 
 ### Software
 - Swift 5.9+
 - ffmpeg
-- Raspberry Pi OS (или другой Linux с доступом к `/dev/mem`)
+- Raspberry Pi OS с доступом к `/dev/mem` и `/dev/vcio`
 
 ## Установка
 
 ### 1. Установка зависимостей
 
 ```bash
-# ffmpeg для конвертации аудио
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install -y build-essential git ffmpeg
 
 # Swift (если не установлен)
 curl -s https://archive.swiftlang.xyz/install.sh | sudo bash
 sudo apt install swiftlang
 ```
 
-### 2. Сборка проекта
+Проверьте, что Swift доступен:
+
+```bash
+swift --version
+```
+
+### 2. Сборка артефакта
 
 ```bash
 git clone https://github.com/yourname/PirateRadio.git
 cd PirateRadio
-swift build -c release
+./builder.sh
 ```
 
-Исполняемый файл будет в `.build/release/pirate-radio`.
+Скрипт соберёт release-бинарь и сохранит результат в `Artifacts`:
 
-### 3. Установка (опционально)
+```text
+Artifacts/
+├── pirate-radio-.../
+│   ├── pirate-radio
+│   ├── MANIFEST.txt
+│   ├── dependencies.txt
+│   ├── help.txt
+│   └── SHA256SUMS.txt
+├── pirate-radio-....tar.gz
+└── pirate-radio-....tar.gz.sha256
+```
+
+Для Raspberry Pi запускайте `builder.sh` именно на Raspberry Pi OS. SwiftPM не делает универсальный бинарь: артефакт, собранный на macOS, не запустится на Raspberry Pi.
+
+Проверьте, что бинарь больше не зависит от `libbcm_host.so`:
 
 ```bash
-sudo cp .build/release/pirate-radio /usr/local/bin/
+ldd Artifacts/pirate-radio-*/pirate-radio | grep bcm_host || echo "OK: libbcm_host не требуется"
+```
+
+### 3. Установка артефакта на Raspberry Pi
+
+Если артефакт уже лежит на Raspberry Pi после `./builder.sh`, установите бинарь из последней директории:
+
+```bash
+artifact_dir="$(ls -dt Artifacts/pirate-radio-*/ | head -n 1)"
+sudo install -m 0755 "${artifact_dir}/pirate-radio" /usr/local/bin/pirate-radio
+```
+
+Если вы переносите `.tar.gz` на другую Raspberry Pi с такой же архитектурой и ОС:
+
+```bash
+mkdir -p ~/pirate-radio-artifact
+tar -xzf pirate-radio-*.tar.gz -C ~/pirate-radio-artifact
+cd ~/pirate-radio-artifact/pirate-radio-*
+sha256sum -c SHA256SUMS.txt
+sudo install -m 0755 pirate-radio /usr/local/bin/pirate-radio
+```
+
+Проверьте установленный бинарь:
+
+```bash
+which pirate-radio
+pirate-radio --version
+ldd "$(which pirate-radio)" | grep bcm_host || echo "OK: установленный бинарь не требует libbcm_host"
 ```
 
 ## Использование
@@ -107,13 +158,15 @@ sudo pirate-radio -d /home/pi/radio -f 99.5
 ## Архитектура
 
 ```
-┌─────────────┐    ┌─────────┐    ┌───────────────┐    ┌─────────┐
-│ Audio Files │───▶│ ffmpeg  │───▶│ fm_transmitter│───▶│ GPIO 4  │~~~▶ FM
-└─────────────┘    └─────────┘    └───────────────┘    └─────────┘
-                   PCM stream         RF signal         Antenna
+┌─────────────┐    ┌─────────┐    ┌────────────┐    ┌────────────────┐    ┌─────────┐
+│ Audio Files │───▶│ ffmpeg  │───▶│ WAV FIFO   │───▶│ CFMTransmitter │───▶│ GPIO 4  │~~~▶ FM
+└─────────────┘    └─────────┘    └────────────┘    └────────────────┘    └─────────┘
+                   PCM stream      named pipe       DMA/clock control     Antenna
 ```
 
-Файлы стримятся по одному, не загружаются в память целиком. Безопасно для папок любого размера.
+Файлы стримятся по одному через `ffmpeg` и временный FIFO. Внешний бинарь `fm_transmitter` не нужен: C++-часть встроена в `pirate-radio`.
+
+Проект не линкуется с `libbcm_host.so`. Базовый адрес и размер периферии Raspberry Pi определяются из Linux device tree (`/proc/device-tree/soc/ranges`). Это убирает зависимость от legacy-пути `/opt/vc/lib`.
 
 ## Запуск как сервис (systemd)
 
@@ -150,6 +203,36 @@ journalctl -u pirate-radio -f
 
 ## Troubleshooting
 
+### `pirate-radio: error while loading shared libraries: libbcm_host.so`
+
+Причина: вы запускаете старый бинарь, собранный с зависимостью от Broadcom userland library `libbcm_host.so`, либо в системе нет пакета с этой библиотекой.
+
+Правильное исправление для текущей версии проекта — пересобрать и переустановить `pirate-radio`:
+
+```bash
+cd PirateRadio
+./builder.sh
+artifact_dir="$(ls -dt Artifacts/pirate-radio-*/ | head -n 1)"
+ldd "${artifact_dir}/pirate-radio" | grep bcm_host || echo "OK: libbcm_host не требуется"
+sudo install -m 0755 "${artifact_dir}/pirate-radio" /usr/local/bin/pirate-radio
+```
+
+Проверьте, какой бинарь реально запускается:
+
+```bash
+which pirate-radio
+ldd "$(which pirate-radio)" | grep bcm_host || echo "OK: установленный бинарь не требует libbcm_host"
+```
+
+Если вы сознательно запускаете старую версию проекта, временный обходной путь:
+
+```bash
+sudo apt install -y libraspberrypi0 libraspberrypi-dev
+sudo ldconfig
+```
+
+Но это именно обходной путь для старого бинаря, а не требование текущей версии.
+
 ### "Требуется запуск с sudo"
 
 Доступ к GPIO требует root-прав:
@@ -158,20 +241,34 @@ journalctl -u pirate-radio -f
 sudo pirate-radio ~/music
 ```
 
-### "fm_transmitter не найден"
+### "Can't open device file: /dev/vcio"
 
-Убедитесь, что проект собран и бинарник доступен.
+Проверьте, что вы запускаете проект на Raspberry Pi OS, а не на обычном Linux. Затем проверьте устройство:
+
+```bash
+ls -l /dev/vcio
+```
+
+Если файла нет, попробуйте загрузить модуль:
+
+```bash
+sudo modprobe vcio
+ls -l /dev/vcio
+```
+
+Если `/dev/vcio` всё ещё отсутствует, текущая ОС/ядро не предоставляет нужный mailbox-интерфейс.
 
 ### Нет звука на приёмнике
 
 1. Проверьте, что антенна подключена к GPIO 4 (pin 7)
 2. Попробуйте другую частоту (100.0, 88.5, 107.0)
 3. Поднесите приёмник ближе к Raspberry Pi
+4. Убедитесь, что запущен именно новый бинарь: `which pirate-radio`
 
 ### ffmpeg не найден
 
 ```bash
-sudo apt install ffmpeg
+sudo apt install -y ffmpeg
 ```
 
 ## Легальность

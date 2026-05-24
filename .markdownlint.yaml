@@ -1,0 +1,38 @@
+# Selective rules - enable only the necessary ones
+default: false
+
+# Headings
+MD001: true # heading-increment: headings are increased by 1 level
+MD003:         # heading-style
+  style: "atx"
+MD018: true # no-missing-space-atx: space after # in header
+MD019: true # no-multiple-spaces-atx: one space after #
+MD022: true #blanks-around-headings: blank lines around headings
+MD025: true # single-h1: one H1 per document
+
+# Lists
+MD004:         # ul-style
+  style: "dash"
+MD005: true # list-indent: consistent indent
+MD007:         # ul-indent
+  indent: 2
+MD030: true # list-marker-space: space after marker
+
+# Code blocks
+MD040: true # fenced-code-language: language specified for code blocks
+MD046:         # code-block-style
+  style: "fenced"
+
+# Links
+MD042: true # no-empty-links: no empty links
+
+# Tables
+MD055:         # table-pipe-style
+  style: "leading_and_trailing"
+MD056: true # table-column-count: same number of columns
+
+# Whitespace
+MD009: true    # no-trailing-spaces
+MD012:         # no-multiple-blanks
+  maximum: 2
+MD047: true    # single-trailing-newline
