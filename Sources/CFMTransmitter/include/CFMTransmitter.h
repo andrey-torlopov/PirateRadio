@@ -32,7 +32,7 @@ typedef enum {
 typedef struct {
     float frequency;      // FM frequency in MHz (e.g., 100.0)
     float bandwidth;      // Bandwidth in kHz (default: 200.0)
-    uint16_t dmaChannel;  // DMA channel (0-15, default: 0)
+    uint16_t dmaChannel;  // DMA channel (0-15), or 255 for CPU mode
     bool loop;            // Loop playback
 } FMTransmitterConfig;
 

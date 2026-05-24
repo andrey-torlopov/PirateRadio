@@ -6,6 +6,7 @@ import FMTransmitter
 struct Arguments {
     var directory: String = "./music"
     var frequency: Float = 100.0
+    var dmaChannel: UInt16 = 0xff
     var shuffle: Bool = false
     var showHelp: Bool = false
     var showVersion: Bool = false
@@ -30,6 +31,16 @@ func parseArguments() -> Arguments {
             }
         case "-s", "--shuffle":
             args.shuffle = true
+        case "--dma-channel":
+            i += 1
+            if i < argv.count {
+                let value = argv[i].lowercased()
+                if value == "cpu" {
+                    args.dmaChannel = 0xff
+                } else if let channel = UInt16(value), channel <= 15 {
+                    args.dmaChannel = channel
+                }
+            }
         case "-h", "--help":
             args.showHelp = true
         case "-v", "--version":
@@ -56,6 +67,7 @@ func printHelp() {
     Опции:
       -d, --directory PATH   Папка с музыкой (по умолчанию: ./music)
       -f, --frequency MHz    Частота вещания (по умолчанию: 100.0)
+      --dma-channel VALUE    DMA канал 0-15 или cpu (по умолчанию: cpu)
       -s, --shuffle          Случайный порядок треков
       -h, --help             Показать эту справку
       -v, --version          Показать версию
@@ -122,6 +134,7 @@ if getuid() != 0 {
 // Проверяем директорию
 let directoryURL = URL(fileURLWithPath: args.directory)
 let fm = FileManager.default
+let transmitterMode = args.dmaChannel == 0xff ? "CPU" : "DMA \(args.dmaChannel)"
 
 if !fm.fileExists(atPath: directoryURL.path) {
     print("✗ Директория не найдена: \(args.directory)")
@@ -135,11 +148,12 @@ print("""
 ├─────────────────────────────────────────┤
 │  Частота: \(String(format: "%6.1f", args.frequency)) MHz                    │
 │  Папка:   \(args.directory.prefix(25).padding(toLength: 25, withPad: " ", startingAt: 0))   │
+│  TX:      \(transmitterMode.prefix(25).padding(toLength: 25, withPad: " ", startingAt: 0))   │
 │  Режим:   \(args.shuffle ? "Shuffle" : "Sequential")                       │
 └─────────────────────────────────────────┘
 """)
 
-let station = RadioStation(directory: directoryURL, frequency: args.frequency)
+let station = RadioStation(directory: directoryURL, frequency: args.frequency, dmaChannel: args.dmaChannel)
 station.playlist.playbackMode = args.shuffle ? .shuffle : .sequential
 
 let delegate = RadioDelegate()

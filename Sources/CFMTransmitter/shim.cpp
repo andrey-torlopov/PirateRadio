@@ -58,7 +58,7 @@ FMTransmitterConfig fm_transmitter_default_config(void) {
     FMTransmitterConfig config;
     config.frequency = 100.0f;
     config.bandwidth = 200.0f;
-    config.dmaChannel = 0;
+    config.dmaChannel = 0xff;
     config.loop = false;
     return config;
 }
@@ -201,7 +201,7 @@ FMTransmitterConfig fm_transmitter_default_config(void) {
     FMTransmitterConfig config;
     config.frequency = 100.0f;
     config.bandwidth = 200.0f;
-    config.dmaChannel = 0;
+    config.dmaChannel = 0xff;
     config.loop = false;
     return config;
 }

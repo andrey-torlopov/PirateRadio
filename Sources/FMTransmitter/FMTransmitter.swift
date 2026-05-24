@@ -78,7 +78,7 @@ public struct FMTransmitterConfiguration {
     /// Ширина полосы в kHz (по умолчанию 200)
     public var bandwidth: Float
 
-    /// DMA канал (0-15)
+    /// DMA канал (0-15). Значение 255 отключает DMA и использует CPU-режим.
     public var dmaChannel: UInt16
 
     /// Повторять воспроизведение
@@ -87,7 +87,7 @@ public struct FMTransmitterConfiguration {
     public init(
         frequency: Float = 100.0,
         bandwidth: Float = 200.0,
-        dmaChannel: UInt16 = 0,
+        dmaChannel: UInt16 = 0xff,
         loop: Bool = false
     ) {
         self.frequency = frequency

@@ -149,6 +149,7 @@ pirate-radio [OPTIONS] [DIRECTORY]
 Опции:
   -d, --directory PATH   Папка с музыкой (по умолчанию: ./music)
   -f, --frequency MHz    Частота вещания (по умолчанию: 100.0)
+  --dma-channel VALUE    DMA канал 0-15 или cpu (по умолчанию: cpu)
   -s, --shuffle          Случайный порядок треков
   -h, --help             Показать справку
   -v, --version          Показать версию
@@ -165,6 +166,9 @@ sudo pirate-radio --shuffle -f 100.0 ~/music
 
 # Указание папки через флаг
 sudo pirate-radio -d /home/pi/radio -f 99.5
+
+# Диагностика старого DMA-режима
+sudo pirate-radio -f 100.6 --dma-channel 0 ~/music
 ```
 
 ### Управление во время работы
@@ -193,12 +197,12 @@ sudo pirate-radio -d /home/pi/radio -f 99.5
 
 ```
 ┌─────────────┐    ┌─────────┐    ┌────────────┐    ┌────────────────┐    ┌─────────┐
-│ Audio Files │───▶│ ffmpeg  │───▶│ WAV FIFO   │───▶│ CFMTransmitter │───▶│ GPIO 4  │~~~▶ FM
+│ Audio Files │───▶│ ffmpeg  │───▶│ Temp WAV   │───▶│ CFMTransmitter │───▶│ GPIO 4  │~~~▶ FM
 └─────────────┘    └─────────┘    └────────────┘    └────────────────┘    └─────────┘
-                   PCM stream      named pipe       DMA/clock control     Antenna
+                   PCM file        disk file        CPU clock control     Antenna
 ```
 
-Файлы стримятся по одному через `ffmpeg` и временный FIFO. Внешний бинарь `fm_transmitter` не нужен: C++-часть встроена в `pirate-radio`.
+Файлы конвертируются по одному через `ffmpeg` во временный WAV-файл и передаются встроенной C++-части. По умолчанию используется CPU-режим управления clock divisor; DMA-режим можно включить через `--dma-channel 0`.
 
 Проект не линкуется с `libbcm_host.so`. Базовый адрес и размер периферии Raspberry Pi определяются из Linux device tree (`/proc/device-tree/soc/ranges`). Это убирает зависимость от legacy-пути `/opt/vc/lib`.
 

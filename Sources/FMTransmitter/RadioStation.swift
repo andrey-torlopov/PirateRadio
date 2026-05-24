@@ -36,10 +36,10 @@ public final class RadioStation {
     private let queue = DispatchQueue(label: "com.pirateradio.station")
     private var shouldStop = false
 
-    public init(directory: URL, frequency: Float = 100.0) {
+    public init(directory: URL, frequency: Float = 100.0, dmaChannel: UInt16 = 0xff) {
         self.frequency = frequency
         self.playlist = Playlist(directory: directory)
-        self.config = FMTransmitterConfiguration(frequency: frequency)
+        self.config = FMTransmitterConfiguration(frequency: frequency, dmaChannel: dmaChannel)
     }
 
     /// Запустить вещание
