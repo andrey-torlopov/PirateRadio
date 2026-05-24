@@ -34,6 +34,7 @@ public struct AudioConverter {
             "-i", inputPath,
             "-map_metadata", "-1",
             "-bitexact",
+            "-vn",
             "-f", "wav",
             "-acodec", "pcm_s16le",
             "-ar", "\(sampleRate)",
@@ -68,6 +69,7 @@ public struct AudioConverter {
             "-i", listFile.path,
             "-map_metadata", "-1",
             "-bitexact",
+            "-vn",
             "-f", "wav",
             "-acodec", "pcm_s16le",
             "-ar", "\(sampleRate)",
@@ -81,6 +83,33 @@ public struct AudioConverter {
             try? FileManager.default.removeItem(at: listFile)
         }
 
+        return process
+    }
+
+    /// Создать процесс для конвертации файла во временный WAV на диске.
+    public static func createFileConversionProcess(
+        inputPath: String,
+        outputPath: String,
+        sampleRate: Int = 22050,
+        channels: Int = 1
+    ) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ffmpeg")
+        process.arguments = [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
+            "-y",
+            "-i", inputPath,
+            "-map_metadata", "-1",
+            "-bitexact",
+            "-vn",
+            "-f", "wav",
+            "-acodec", "pcm_s16le",
+            "-ar", "\(sampleRate)",
+            "-ac", "\(channels)",
+            outputPath
+        ]
         return process
     }
 }
