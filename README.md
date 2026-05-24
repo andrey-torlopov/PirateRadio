@@ -37,7 +37,41 @@ sudo apt install swiftlang
 swift --version
 ```
 
-### 2. Сборка артефакта
+### 2. Полная сборка и установка на Raspberry Pi
+
+На Raspberry Pi OS из корня проекта запустите одну команду:
+
+```bash
+./builder.sh --raspberry-pi --install-deps --music-dir ~/music --frequency 100.0
+```
+
+Что сделает скрипт:
+
+- проверит, что запуск идёт на Raspberry Pi OS 64-bit;
+- установит apt-зависимости `build-essential`, `git`, `ffmpeg`, `curl`, `ca-certificates`;
+- проверит наличие Swift;
+- соберёт release-бинарь;
+- сохранит артефакт в `Artifacts`;
+- проверит, что бинарь не зависит от `libbcm_host.so`;
+- установит `pirate-radio` в `/usr/local/bin/pirate-radio`;
+- напечатает готовую команду запуска.
+
+Если Swift ещё не установлен и пакет `swiftlang` недоступен в apt, сначала установите Swift 5.9+, затем повторите команду выше.
+
+Чтобы после сборки и установки сразу запустить вещание:
+
+```bash
+./builder.sh --raspberry-pi --install-deps --run --music-dir ~/music --frequency 100.0
+```
+
+Перед `--run` положите музыку в указанную папку:
+
+```bash
+mkdir -p ~/music
+cp /path/to/your/*.mp3 ~/music/
+```
+
+### 3. Только сборка артефакта
 
 ```bash
 git clone https://github.com/yourname/PirateRadio.git
@@ -67,7 +101,7 @@ Artifacts/
 ldd Artifacts/pirate-radio-*/pirate-radio | grep bcm_host || echo "OK: libbcm_host не требуется"
 ```
 
-### 3. Установка артефакта на Raspberry Pi
+### 4. Ручная установка артефакта
 
 Если артефакт уже лежит на Raspberry Pi после `./builder.sh`, установите бинарь из последней директории:
 
